@@ -18,16 +18,15 @@ import abc
 import httplib
 import six
 import time
-import Cookie
 
 from neutron.openstack.common import log as logging
-from neutron.plugins.ml2.drivers.fortinet import api_client
+from neutron.plugins.ml2.drivers.fortinet import fortios
 
 
 LOG = logging.getLogger(__name__)
 
 GENERATION_ID_TIMEOUT = -1
-DEFAULT_CONCURRENT_CONNECTIONS = 1
+DEFAULT_CONCURRENT_CONNECTIONS = 3
 DEFAULT_CONNECT_TIMEOUT = 5
 
 
@@ -86,51 +85,9 @@ class ApiClientBase(object):
             cookie = data[1]
         return cookie
 
-    @staticmethod
-    def format_cookie(cookie):
-        if not cookie:
-            return None
-        try:
-            fmt_headers = {}
-            cookies = Cookie.SimpleCookie(cookie)
-            for key, morsel in cookies.iteritems():
-                if "ccsrftoken" in morsel.key:
-                    morsel.coded_value = morsel.value
-                    fmt_headers["X-CSRFTOKEN"] = morsel.value
-                    break
-            fmt_headers["Cookie"] = cookies.output(header="").lstrip()
-            return fmt_headers
-        except (Cookie.CookieError, KeyError):
-            LOG.error(_("The cookie ccsrftoken cannot be formatted"))
-            raise Cookie.CookieError
-
-    @staticmethod
-    def format_cookie2(cookie):
-        if not cookie:
-            return None
-        try:
-            fmt_headers = {}
-            cookies = Cookie.SimpleCookie(cookie)
-            print "### cookies=%s" % cookies
-            for key, morsel in cookies.iteritems():
-                print "### key=%s, morsel=%s" % (key, morsel)
-                if "ccsrftoken" in morsel.key:
-                    morsel.coded_value = morsel.value
-                    fmt_headers["X-CSRFTOKEN"] = morsel.value
-                print "#### key = %s, morsel=%s" %(key, morsel)
-            print "### cookies=%s" % cookies
-            fmt_headers["Cookie"] = cookies.output(header="").lstrip()
-            print "### fmt_headers=%s" % fmt_headers
-            return fmt_headers
-        except (Cookie.CookieError, KeyError):
-            LOG.error(_("The cookie ccsrftoken cannot be formatted"))
-            raise Cookie.CookieError
-
-
     def set_auth_cookie(self, conn, cookie):
         data = self._get_provider_data(conn)
         if data:
-            cookie = self.format_cookie(cookie)
             self._set_provider_data(conn, (data[0], cookie))
 
     def acquire_connection(self, auto_login=True, headers=None, rid=-1):
@@ -143,6 +100,9 @@ class ApiClientBase(object):
         :returns: An available HTTPConnection instance or None if no
                  api_providers are configured.
         '''
+        if not self._api_providers:
+            LOG.warn(_("[%d] no API providers currently available."), rid)
+            return None
         if self._conn_pool.empty():
             LOG.debug(_("[%d] Waiting to acquire API client connection."), rid)
         priority, conn = self._conn_pool.get()

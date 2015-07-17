@@ -37,29 +37,25 @@ class ApiException(Exception):
         return self._error_string
 
 
-class UnAuthorizedRequest(ApiException):
+class UnAuthorizedRequest(NsxApiException):
     message = _("Server denied session's authentication credentials.")
 
 
-class ResourceNotFound(ApiException):
+class ResourceNotFound(NsxApiException):
     message = _("An entity referenced in the request was not found.")
 
 
-class Conflict(ApiException):
+class Conflict(NsxApiException):
     message = _("Request conflicts with configuration on a different "
                 "entity.")
 
 
-class Failed_dependency(ApiException):
-    message = _("Request failed dependency.")
-
-
-class ServiceUnavailable(ApiException):
+class ServiceUnavailable(NsxApiException):
     message = _("Request could not completed because the associated "
                 "resource could not be reached.")
 
 
-class Forbidden(ApiException):
+class Forbidden(NsxApiException):
     message = _("The request is forbidden from accessing the "
                 "referenced resource.")
 
@@ -68,11 +64,11 @@ class ReadOnlyMode(Forbidden):
     message = _("Create/Update actions are forbidden when in read-only mode.")
 
 
-class RequestTimeout(ApiException):
+class RequestTimeout(NsxApiException):
     message = _("The request has timed out.")
 
 
-class BadRequest(ApiException):
+class BadRequest(NsxApiException):
     message = _("The server is unable to fulfill the request due "
                 "to a bad syntax")
 
@@ -94,8 +90,6 @@ def fourZeroFour(response=None):
 def fourZeroNine(response=None):
     raise Conflict()
 
-def fourTwoFour(response=None):
-    raise Failed_dependency()
 
 def fiveZeroThree(response=None):
     raise ServiceUnavailable()
@@ -109,19 +103,19 @@ def fourZeroThree(response=None):
 
 
 def zero(self, response=None):
-    raise ApiException()
+    raise NsxApiException()
 
 
 ERROR_MAPPINGS = {
-    301: zero,
-    307: zero,
     400: fourZeroZero,
-    403: fourZeroThree,
     404: fourZeroFour,
     405: zero,
     409: fourZeroNine,
-    424: fourTwoFour,
+    503: fiveZeroThree,
+    403: fourZeroThree,
+    301: zero,
+    307: zero,
     500: zero,
     501: zero,
-    503: fiveZeroThree,
+    503: zero
 }

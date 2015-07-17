@@ -65,19 +65,16 @@ class FortiosApiClient(eventlet_client.EventletApiClient):
         self.login(self._user, self._password)
 
 
-    def __del__(self):
-        while not self._conn_pool.empty():
-            priority, conn = self._conn_pool.get()
-            conn.close()
-
-
-    def _render(self, template, message):
+    def _render(self, template, message=None):
         '''Render API message from it's template
 
         :param template: defined API message with essential params.
         :param message: It is a dictionary, included values of the params
-            for the template
+                        for the template
         '''
+        if not message:
+            message = {}
+        print unicode(Template(template, message))
         self.message = json.loads(unicode(Template(template, message)))
 
 
@@ -103,12 +100,27 @@ class FortiosApiClient(eventlet_client.EventletApiClient):
                     'and password:%(password)s'),
                   {'username': self._user, 'password': self._password})
 
-    def request(self, opt, message, content_type="application/json"):
+
+    def logout(self):
+        '''Login to Fortigate.
+
+        Assumes same password is used for all controllers.
+        :param user: controller user (usually admin). Provided for
+                backwards compatibility. In the  normal mode of operation
+                this should be None.
+        :param password: controller password. Provided for backwards
+                compatibility. In the normal mode of operation this should
+                be None.
+        '''
+        self.request("LOGOUT")
+
+
+    def request(self, opt, message=None, content_type="application/json"):
         '''Issues request to controller.'''
         self._render(getattr(templates, opt), message)
         method = self.message['method']
         url = self.message['path']
-        body = self.message['body']
+        body = self.message['body'] if 'body' in self.message else None
         g = eventlet_request.GenericRequestEventlet(
             self, method, url, body, content_type, auto_login=True,
             http_timeout=self._http_timeout,
@@ -134,7 +146,6 @@ class FortiosApiClient(eventlet_client.EventletApiClient):
         status = response.status
         if status == httplib.UNAUTHORIZED:
             raise exception.UnAuthorizedRequest()
-
         # Fail-fast: Check for exception conditions and raise the
         # appropriate exceptions for known error codes.
         if status in exception.ERROR_MAPPINGS:
@@ -151,39 +162,138 @@ class FortiosApiClient(eventlet_client.EventletApiClient):
                        'status': response.status, 'body': response.body})
             return None
 
-        return response.body
+        if url == json.loads(templates.LOGOUT)['path']:
+            return response.body
+        else:
+            return json.loads(response.body)
 
 
 if __name__ == "__main__":
-    api = [("10.160.37.99", 80, False)]
+    import time
+    api = [("10.160.37.95", 80, False)]
     user = "admin"
     password = ""
     cli = FortiosApiClient(api, user, password)
     print "----------"
     message = {
-        #"name": "vlan_300",
-        "vlanid": 301,
-        "interface": "internal"
+        "name": "ext_4093",
+        "vlanid": 4093,
+        "vdom": "osvdm21",
+        "interface": "npu0_vlink0",
+        "ip": "192.168.30.254 255.255.255.0"
     }
-    #cli.request("CREATE_VLAN_INTERFACE", message)
-
+    #cli.request("ADD_VLAN_INTERFACE", message)
     message = {
-        "name": "os_vid_300"
+        "name": "ext_4093",
+        "vdom": "osvdm21",
+        "secondaryips": ["192.168.20.200 255.255.255.0",]
+        #"secondaryips": []
     }
+    #print cli.request("SET_VLAN_INTERFACE", message)
+    message = {
+        "name": "ext_4093"
+    }
+
+    #print cli.request("GET_VLAN_INTERFACE", message)
+
+    #print "mac_address =",res["results"][0]["macaddr"]
     #cli.request("DELETE_VLAN_INTERFACE", message)
     message = {
-        "interface": "os_vid_300"
+        "vdom": "osvdm15",
+        "interface": "os_vid_1009",
+        "gateway": "192.168.30.1",
+        "netmask": "255.255.255.0",
+        "start_ip": "192.168.30.2",
+        "end_ip": "192.168.30.254"
     }
-    #cli.request("CONF_DHCP", message)
+
+    #dhcp = cli.request("ADD_DHCP_SERVER", message)
+    #print 'dhcp["results"]["mkey"] = ', dhcp["results"]["mkey"]
+
     message = {
-        "name": "test1"
+        "vdom": "osvdm21",
+        "id": 1
     }
-    #cli.request("ADD_VDOM", message)
+    #print cli.request("DELETE_DHCP_SERVER", message)
+    #print cli.request("GET_DHCP_SERVER", message)
+
+    #time.sleep(0)
+    message = {
+        "name": "osvdm20"
+    }
+    #print cli.request("ADD_VDOM", message)
     #print cli.request("DELETE_VDOM", message)
-    print cli.request("GET_VDOM", message)
+    #print cli.request("GET_VDOM", message)
     #print cli.request("ADD_VDOM_LNK", message)
     #print cli.request("GET_VDOM_LNK", message)
     #sleep(5)
     #print cli.request("DELETE_VDOM_LNK", message)
     #print cli.request("GET_VDOM_LNK", {"name": ""})
+    message = {
+        "id": 1,
+        "vdom": "osvdm15",
+        #"rid": 1,
+        "reserved_address": """[
+            {
+                "id": 1,
+                "ip": "192.168.30.200",
+                "mac": "00:0C:29:70:51:D6"
+            },
+            {
+                "id": 2,
+                "ip": "192.168.30.201",
+                "mac": "00:0C:29:70:51:D7"
+            }
+        ]"""
+    }
+    message1 = {
+        "id": 1,
+        "vdom": "osvdm15",
+        "rid": 0,
+        "ip": "192.168.30.201",
+        "mac": "00:0C:29:70:52:D6"
+    }
+    #print cli.request("SET_DHCP_SERVER_RSV_ADDR", message)
+    message = {
+        "vdom": "root"
+    }
+    #print cli.request("GET_ROUTER_STATIC", message)
+    message = {
+        "vdom": "root",
+        "dst": "10.160.37.0 255.255.255.0",
+        "device": "port32",
+        "gateway": "10.160.37.1"
+    }
+    #print cli.request("ADD_ROUTER_STATIC", message)
+    message = {
+        "id": 4,
+        "vdom": "root"
+    }
+    #print cli.request("DELETE_ROUTER_STATIC", message)
+    message = {
+        "vdom": "osvdm21",
+        "srcintf": "os_vid_1010",
+        "dstintf": "any"
+    }
+    #print cli.request("ADD_FIREWALL_POLICY", message)
+    message = {
+        "id": 10,
+        "vdom": "osvdm21"
+    }
+    print cli.request("DELETE_FIREWALL_POLICY", message)
+    message = {
+        "vdom": "osvdm21",
+        "name": "test",
+        "extip": "169.254.254.2",
+        "extintf": "vlan-ext1-4000",
+        "mappedip": "192.168.11.3"
+    }
+    #print cli.request("ADD_FIREWALL_VIP", message)
+    message = {
+        "vdom": "osvdm21",
+        "name": "test"
+    }
+    #print cli.request("GET_FIREWALL_VIP", message)
+    #print cli.request("DELETE_FIREWALL_VIP", message)
+    cli.logout()
     print ""

@@ -20,23 +20,20 @@ import copy
 import eventlet
 import httplib
 import time
-import json
-import urllib
 
 import six
 import six.moves.urllib.parse as urlparse
 
 from neutron.openstack.common import excutils
 from neutron.openstack.common import log as logging
-from neutron.plugins.ml2.drivers.fortinet import api_client
-from neutron.plugins.ml2.drivers.fortinet.api_client import templates
+from neutron.plugins.vmware import api_client
 
 LOG = logging.getLogger(__name__)
 
 DEFAULT_HTTP_TIMEOUT = 30
 DEFAULT_RETRIES = 2
 DEFAULT_REDIRECTS = 2
-DEFAULT_API_REQUEST_POOL_SIZE = 1
+DEFAULT_API_REQUEST_POOL_SIZE = 1000
 DEFAULT_MAXIMUM_REQUEST_ID = 4294967295
 DOWNLOAD_TIMEOUT = 180
 
@@ -89,7 +86,7 @@ class ApiRequest(object):
             return error
 
         url = self._url
-        LOG.debug(_("[%(rid)d] Issuing - request url: %(conn)s, "
+        LOG.debug(_("[%(rid)d] Issuing - request url: %(conn)s "
                     "body: %(body)s"),
                   {'rid': self._rid(), 'conn': self._request_str(conn, url),
                    'body': self._body})
@@ -112,33 +109,15 @@ class ApiRequest(object):
                 headers = copy.copy(self._headers)
                 cookie = self._api_client.auth_cookie(conn)
                 if cookie:
-                    headers["Cookie"] = cookie["Cookie"]
-                    headers["X-CSRFTOKEN"] = cookie["X-CSRFTOKEN"]
+                    headers["Cookie"] = cookie
 
-                print "------conn.request ----------"
-                print "conn.sock = ", conn.sock
-                print "cookie = ", cookie
-                print "headers = ", headers
-                print "------conn.request ----------"
-                print "url=",url
-                print "self._method = [%s], len(method)=%s" % (self._method, len(self._method))
-                print "self._body = [%s]" % self._body
-                print "------conn.request ----------"
-
+                gen = self._api_client.config_gen
+                if gen:
+                    headers["X-Nvp-Wait-For-Config-Generation"] = gen
+                    LOG.debug(_("Setting X-Nvp-Wait-For-Config-Generation "
+                                "request header: '%s'"), gen)
                 try:
-                    if self._body:
-                        if self._url == json.loads(templates.LOGIN)['path']:
-                            body = urllib.urlencode(self._body)
-                        else:
-                            body = json.dumps(self._body)
-                    else:
-                        body = None
-                    LOG.warn(_("####### issuing request: "
-                                "self._method = [%(method)s], "
-                                "url=%(url)s, body=%(body)s, headers=%(headers)s"),
-                                 {'method': self._method, "url": url,
-                                  "body": body, "headers": headers})
-                    conn.request(self._method, url, body, headers)
+                    conn.request(self._method, url, self._body, headers)
                 except Exception as e:
                     with excutils.save_and_reraise_exception():
                         LOG.warn(_("[%(rid)d] Exception issuing request: "
@@ -149,35 +128,35 @@ class ApiRequest(object):
                 response.body = response.read()
                 response.headers = response.getheaders()
                 elapsed_time = time.time() - issued_time
-                LOG.debug(_("@@@@@@ [ _issue_request ] [%(rid)d] Completed request '%(conn)s': "
-                            "%(status)s (%(elapsed)s seconds), "
-                            "response.headers %(response.headers)s"
-                            "response.body %(response.body)s"),
+                LOG.debug(_("[%(rid)d] Completed request '%(conn)s': "
+                            "%(status)s (%(elapsed)s seconds)"),
                           {'rid': self._rid(),
                            'conn': self._request_str(conn, url),
                            'status': response.status,
-                           'elapsed': elapsed_time,
-                           'response.headers': response.headers,
-                           'response.body': response.body})
+                           'elapsed': elapsed_time})
 
-                if response.status in (httplib.UNAUTHORIZED, httplib.FOUND):
-                    if cookie is None and \
-                       self._url != json.loads(templates.LOGIN)['path']:
+                new_gen = response.getheader('X-Nvp-Config-Generation', None)
+                if new_gen:
+                    LOG.debug(_("Reading X-Nvp-config-Generation response "
+                                "header: '%s'"), new_gen)
+                    if (self._api_client.config_gen is None or
+                        self._api_client.config_gen < int(new_gen)):
+                        self._api_client.config_gen = int(new_gen)
+
+                if response.status == httplib.UNAUTHORIZED:
+
+                    if cookie is None and self._url != "/ws.v1/login":
                         # The connection still has no valid cookie despite
                         # attempts to authenticate and the request has failed
                         # with unauthorized status code. If this isn't a
                         # a request to authenticate, we should abort the
                         # request since there is no point in retrying.
                         self._abort = True
-                    self._api_client.release_connection(conn, is_conn_error,
-                                                        True,
-                                                        rid=self._rid())
-                    self._api_client.login(self._api_client.user,
-                                           self._api_client.password)
+
                     # If request is unauthorized, clear the session cookie
                     # for the current provider so that subsequent requests
                     # to the same provider triggers re-authentication.
-                    self._api_client.set_auth_cookie(self, conn, None)
+                    self._api_client.set_auth_cookie(conn, None)
                 elif response.status == httplib.SERVICE_UNAVAILABLE:
                     is_conn_service_unavail = True
 
@@ -189,6 +168,7 @@ class ApiRequest(object):
                                "request"), self._rid())
                     break
                 redirects += 1
+
                 conn, url = self._redirect_params(conn, response.headers,
                                                   self._client_conn is None)
                 if url is None:
@@ -247,6 +227,7 @@ class ApiRequest(object):
         Returns: Return tuple(conn, url) where conn is a connection object
             to the redirect target and url is the path of the API request
         """
+
         url = None
         for name, value in headers:
             if name.lower() == "location":
@@ -301,5 +282,5 @@ class ApiRequest(object):
 
     def _request_str(self, conn, url):
         '''Return string representation of connection.'''
-        return "%s %s%s" % (self._method, api_client.ctrl_conn_to_str(conn),
+        return "%s %s/%s" % (self._method, api_client.ctrl_conn_to_str(conn),
                              url)

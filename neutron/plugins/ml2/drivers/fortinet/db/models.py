@@ -17,37 +17,167 @@
 """Fortinet specific database schema/model."""
 
 import sqlalchemy as sa
+import neutron.plugins.ml2.db as ml2_db
 
 from neutron.db import model_base
 from neutron.db import models_v2
-
+from neutron.db.external_net_db import ExternalNetwork
 ## TODO: add log here temporarily
 from neutron.openstack.common import log as logging
-LOG = logging.getLogger(__name__)
+from neutron.plugins.ml2.drivers.fortinet.common import constants as const
 
+
+LOG = logging.getLogger(__name__)
 
 class Fortinet_ML2_Namespace(model_base.BASEV2):
     """Schema for Fortinet network."""
-
     id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    tenant_id = sa.Column(sa.String(36))
+    tenant_id = sa.Column(sa.String(36), primary_key=True)
     # For the name of vdom has the following restrictions:
     # only letters, numbers, "-" and "_" are allowed
     # no more than 11 characters are allowed
     # no spaces are allowed
     vdom_name = sa.Column(sa.String(11))
 
+class Fortinet_ML2_Subnet(model_base.BASEV2):
+    """Schema to map subnet to Fortinet dhcp interface."""
+    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
+    subnet_id = sa.Column(sa.String(36))
+    vdom_name = sa.Column(sa.String(11))
+    mkey = sa.Column(sa.Integer)
+
+class Fortinet_ML2_ReservedIP(model_base.BASEV2):
+    """Schema for Fortinet dhcp server reserved ip."""
+    port_id = sa.Column(sa.String(36), primary_key=True)
+    subnet_id = sa.Column(sa.String(36))
+    mac = sa.Column(sa.String(32))
+    ip = sa.Column(sa.String(32))
+    vdom_name = sa.Column(sa.String(11))
+    edit_id = sa.Column(sa.Integer)
+
+class Fortinet_Static_Router(model_base.BASEV2):
+    """Schema for Fortinet static router."""
+    subnet_id = sa.Column(sa.String(36), primary_key=True)
+    vdom_name = sa.Column(sa.String(11))
+    edit_id = sa.Column(sa.Integer)
+
+class Fortinet_Vlink_Vlan_Allocation(model_base.BASEV2):
+    """Schema for Fortinet vlink vlan interface."""
+    vlan_id = sa.Column(sa.Integer, primary_key=True)
+    vdom_name = sa.Column(sa.String(11))
+    inf_name_int_vdom = sa.Column(sa.String(11))
+    inf_name_ext_vdom = sa.Column(sa.String(11))
+    allocated = sa.Column(sa.Boolean(), default=False, nullable=False)
+
+class Fortinet_Vlink_IP_Allocation(model_base.BASEV2):
+    """Schema for Fortinet vlink vlan interface."""
+    vlink_ip_subnet = sa.Column(sa.String(32), primary_key=True)
+    vdom_name = sa.Column(sa.String(11))
+    vlan_id = sa.Column(sa.Integer)
+    allocated = sa.Column(sa.Boolean(), default=False, nullable=False)
+
+
+class Fortinet_Firewall_Policy(model_base.BASEV2):
+    """Schema for Fortinet firewall policy."""
+    __tablename__ = 'fortinet_firewall_policies'
+    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
+    vdom_name = sa.Column(sa.String(11))
+    srcintf = sa.Column(sa.String(11))
+    dstintf = sa.Column(sa.String(11))
+    srcaddr = sa.Column(sa.String(32), default="all")
+    dstaddr = sa.Column(sa.String(32), default="all")
+    edit_id = sa.Column(sa.Integer)
+
+
+class Fortinet_FloatingIP_Allocation(model_base.BASEV2):
+    """Schema for Fortinet vlink vlan interface.
+    ip_subnet: it is a network with 30 bits network, there
+    are two ips available, the smaller one will be allocated
+    to the interface of the external network vdom and the
+    bigger one will be allocated to the interface of related
+    tenant network vdom.
+    """
+    ip_subnet = sa.Column(sa.String(32), primary_key=True)
+    floating_ip_address = sa.Column(sa.String(36))
+    vdom_name = sa.Column(sa.String(11))
+    vip_name = sa.Column(sa.String(50))
+    allocated = sa.Column(sa.Boolean(), default=False, nullable=False)
+    bound = sa.Column(sa.Boolean(), default=False, nullable=False)
+
 
 class ML2_FortinetPort(model_base.BASEV2, models_v2.HasId,
                       models_v2.HasTenant):
     """Schema for Fortinet port."""
-
     network_id = sa.Column(sa.String(36),
                            sa.ForeignKey("ml2_Fortinetnetworks.id"),
                            nullable=False)
     admin_state_up = sa.Column(sa.Boolean, nullable=False)
     physical_interface = sa.Column(sa.String(36))
     vlan_id = sa.Column(sa.String(36))
+
+
+def add_record(session, cls, **kwargs):
+    """Add vlanid to be allocated into the table"""
+    ##session = context.session
+    with session.begin(subtransactions=True):
+        record = get_record(session, cls, **kwargs)
+        LOG.debug(_("##### add_record() record = %s" % record))
+        if not record:
+            record = cls()
+            for key, value in kwargs.iteritems():
+                setattr(record, key, value)
+            session.add(record)
+    return record
+
+
+def update_record(context, record, **kwargs):
+    """Add vlanid to be allocated into the table"""
+    try:
+        for key, value in kwargs.iteritems():
+            setattr(record, key, value)
+        session = context.session
+        with session.begin(subtransactions=True):
+            session.add(record)
+    except:
+        raise Exception
+
+
+def delete_record(session, cls, **kwargs):
+    """Delete vlanid to be allocated into the table"""
+    with session.begin(subtransactions=True):
+        record = get_record(session, cls, **kwargs)
+        if record:
+            session.delete(record)
+    return record
+
+
+def get_record(session, cls, **kwargs):
+    """Get a filtered vlink_vlan_allocation record."""
+    #session = context.session
+    query = _query(session, cls, **kwargs)
+    return query.first()
+
+
+def get_records(session, cls, **kwargs):
+    """Get a filtered vlink_vlan_allocation record."""
+    query = _query(session, cls, **kwargs)
+    return query.all()
+
+
+def _query(session, cls, **kwargs):
+    """Get a filtered vlink_vlan_allocation record."""
+    if not hasattr(session, "query"):
+        LOG.debug(_("##### not attr query? session = %s" % session))
+        session = session.session
+    LOG.debug(_("##### kwargs = %s" % kwargs))
+    query = session.query(cls)
+    for key, value in kwargs.iteritems():
+        LOG.debug(_("##### key = %s, value =%s" % (key, value)))
+        kw = {key: value}
+        query = query.filter_by(**kw)
+        LOG.debug(_("##### query = %s" % query))
+    return query
+
 
 def create_namespace(context, tenant_id):
     """Create a Fortinet vdom associated with the Tenant."""
@@ -59,38 +189,40 @@ def create_namespace(context, tenant_id):
                                                vdom_name=None)
             session.add(namespace)
             id = get_namespace(context, tenant_id)["id"]
-            vdom_name = "osvdm" + str(id)
+            vdom_name = const.PREFIX["vdom"] + str(id)
             namespace.vdom_name = vdom_name
             session.add(namespace)
     return namespace
 
+
 def delete_namespace(context, tenant_id):
     """Create a Fortinet vdom associated with the Tenant."""
-    LOG.debug(_("!!!!!!! delete_namespace   "))
     session = context.session
-    LOG.debug(_(" dir(session) = ", dir(session)))
-    LOG.debug(_(" session = ", session))
     with session.begin(subtransactions=True):
-        count = session.query(models_v2.Network).\
-                     filter_by(tenant_id=tenant_id).count()
-        LOG.debug(_("##### count = %s" % count))
-        if count == 1:
-            namespace = get_namespace(context, tenant_id)
-            session.delete(namespace)
-            LOG.debug(_("!!!!!!! namespace=", namespace))
-            return namespace
-    return None
+        namespace = get_namespace(context, tenant_id)
+        session.delete(namespace)
+    return namespace
+
 
 
 def get_namespace(context, tenant_id):
-    """Get Fortinet specific network, with vlan extension."""
-
+    """Get Fortinet specific vdom name associated with a tenant."""
     session = context.session
     namespace = session.query(Fortinet_ML2_Namespace).\
         filter_by(tenant_id=tenant_id).first()
-    LOG.debug(_("!!!!!!! get_namespace namespace=", namespace))
     return namespace
 
+def tenant_network_count(context, tenant_id):
+    session = context.session
+    with session.begin(subtransactions=True):
+        return session.query(models_v2.Network).\
+                     filter_by(tenant_id=tenant_id).count()
+
+def get_ext_network(context, network_id):
+    """Get Fortinet specific network, with vlan extension."""
+    session = context.session
+    return session.query(ExternalNetwork).\
+                   filter_by(network_id=network_id).first()
 
 
 def create_network(context, net_id, vlan, segment_id, network_type, tenant_id):
@@ -120,16 +252,164 @@ def delete_network(context, net_id):
 
 def get_network(context, net_id, fields=None):
     """Get Fortinet specific network, with vlan extension."""
-
     session = context.session
     return session.query(ML2_FortinetNetwork).filter_by(id=net_id).first()
 
 
 def get_networks(context, filters=None, fields=None):
     """Get all Fortinet specific networks."""
-
     session = context.session
     return session.query(ML2_FortinetNetwork).all()
+
+def get_vdom(context, subnet_id):
+    session = context.session
+    subnet = session.query(models_v2.Subnet).\
+                     filter_by(id=subnet_id).first()
+    if subnet:
+        namespace = get_namespace(context, subnet.tenant_id)
+        return namespace.vdom_name
+    return None
+
+def create_subnet(context, subnet_id, mkey=None):
+    """Create a subnet associated with a fortigate's dhcp server"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        subnet = get_subnet(context, subnet_id)
+        if not subnet:
+            vdom_name = get_vdom(context, subnet_id)
+            subnet = Fortinet_ML2_Subnet(subnet_id=subnet_id,
+                                         vdom_name=vdom_name,
+                                         mkey=mkey)
+            session.add(subnet)
+    return subnet
+
+def delete_subnet(context, subnet_id):
+    """Delete a subnet associated with a fortigate's dhcp server"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        subnet = get_subnet(context, subnet_id)
+        if subnet:
+            session.delete(subnet)
+    return subnet
+
+def update_subnet(context, subnet_id, mkey):
+    """Create a Fortinet vdom associated with the Tenant."""
+    session = context.session
+    with session.begin(subtransactions=True):
+        subnet = get_subnet(context, subnet_id)
+        subnet.mkey = mkey
+        session.add(subnet)
+    return subnet
+
+def get_subnet(context, subnet_id):
+    session = context.session
+    subnet = session.query(Fortinet_ML2_Subnet).\
+             filter_by(subnet_id=subnet_id).first()
+    return subnet
+
+def get_subnets(context, vdom_name):
+    session = context.session
+    subnets = session.query(Fortinet_ML2_Subnet).\
+             filter_by(vdom_name=vdom_name).all()
+    return subnets
+
+def create_reserved_ip(context, port_id, subnet_id, tenant_id,
+                       ip, mac, edit_id=None):
+    """associated vm's ip and vm's mac with the related dhcp server"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        reserved_ip = get_reserved_ip(context, port_id)
+        if not reserved_ip:
+            namespace = get_namespace(context, tenant_id)
+            vdom_name = namespace.vdom_name
+            _last_record = session.query(Fortinet_ML2_ReservedIP).\
+                filter_by(subnet_id=subnet_id).\
+                order_by(Fortinet_ML2_ReservedIP.edit_id.desc()).first()
+            edit_id = _last_record.edit_id + 1 if _last_record else 1
+            reserved_ip = Fortinet_ML2_ReservedIP(port_id=port_id,
+                                                  subnet_id=subnet_id,
+                                                  mac=mac,
+                                                  ip=ip,
+                                                  vdom_name=vdom_name,
+                                                  edit_id=edit_id)
+            session.add(reserved_ip)
+    return reserved_ip
+
+def update_reserved_ip(context, port_id, edit_id=None):
+    """update the edit_id of the record with id = port_id"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        reserved_ip = get_reserved_ip(context, port_id)
+        if reserved_ip and edit_id:
+            reserved_ip.edit_id = edit_id
+            session.add(reserved_ip)
+            return reserved_ip
+        else:
+            return None
+
+
+def get_reserved_ip(context, port_id):
+    session = context.session
+    reserved_ip = session.query(Fortinet_ML2_ReservedIP).\
+                  filter_by(port_id=port_id).first()
+    return reserved_ip
+
+def get_reserved_ips(context, subnet_id):
+    session = context.session
+    reserved_ips = session.query(Fortinet_ML2_ReservedIP).\
+                  filter_by(subnet_id=subnet_id).all()
+    LOG.debug(_("!!!!! reserved_ips = %s" % reserved_ips))
+    return reserved_ips
+
+def delete_reserved_ip(context, port_id):
+    """delete the record from the table Fortinet_ML2_ReservedIP"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        reserved_ip = get_reserved_ip(context, port_id)
+        if reserved_ip:
+            session.delete(reserved_ip)
+    return reserved_ip
+
+
+def create_static_router(context, subnet_id, vdom_name, edit_id=None):
+    """add static router records to the table fortinet_static_routers"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        static_router = get_static_router(context, subnet_id)
+        if not static_router:
+            static_router = Fortinet_Static_Router(subnet_id=subnet_id,
+                                                  vdom_name=vdom_name,
+                                                  edit_id=edit_id)
+            session.add(static_router)
+    return static_router
+
+def get_static_router(context, subnet_id):
+    """query static router records of the table fortinet_static_routers"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        static_router = session.query(Fortinet_Static_Router).\
+                  filter_by(subnet_id=subnet_id).first()
+    return static_router
+
+def delete_static_router(context, subnet_id):
+    """delete a static router record from the table fortinet_static_routers"""
+    session = context.session
+    with session.begin(subtransactions=True):
+        static_router = session.query(Fortinet_Static_Router).\
+                  filter_by(subnet_id=subnet_id).first()
+        if static_router:
+            session.delete(static_router)
+    return static_router
+
+
+def get_secondaryips(context, subnet_id):
+    session = context.session
+    with session.begin(subtransactions=True):
+        static_router = session.query(Fortinet_FloatingIP_Allocation).\
+                  filter_by(subnet_id=subnet_id).all()
+        if static_router:
+            session.delete(static_router)
+    return secondaryips
 
 
 def create_port(context, port_id, network_id, physical_interface,
@@ -147,7 +427,6 @@ def create_port(context, port_id, network_id, physical_interface,
                                    admin_state_up=admin_state_up,
                                    tenant_id=tenant_id)
             session.add(port)
-
     return port
 
 
