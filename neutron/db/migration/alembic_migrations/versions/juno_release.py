@@ -16,14 +16,14 @@
 """juno
 
 Revision ID: juno
-Revises: 1361f3eff452
+Revises: 3918b408c531
 Create Date: 2014-10-09 00:00:00.000000
 
 """
 
 # revision identifiers, used by Alembic.
 revision = 'juno'
-down_revision = '1361f3eff452'
+down_revision = '3918b408c531'
 
 
 def upgrade():
