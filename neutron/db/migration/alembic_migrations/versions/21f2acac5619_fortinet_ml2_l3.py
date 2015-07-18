@@ -13,16 +13,16 @@
 #    under the License.
 #
 
-"""fortinet l3
+"""fortinet ml2 l3
 
-Revision ID: 3918b408c531
+Revision ID: 21f2acac5619
 Revises: 544673ac99ab
-Create Date: 2015-07-17 18:49:32.984105
+Create Date: 2015-07-18 00:50:16.302498
 
 """
 
 # revision identifiers, used by Alembic.
-revision = '3918b408c531'
+revision = '21f2acac5619'
 down_revision = '544673ac99ab'
 
 from alembic import op
@@ -115,12 +115,11 @@ def upgrade():
     mysql_engine=u'InnoDB'
     )
     op.create_table(u'fortinet_vlink_ip_allocations',
-    sa.Column(u'id', mysql.INTEGER(display_width=11), nullable=False),
-    sa.Column(u'ip_int_vdom', mysql.VARCHAR(length=32), nullable=True),
-    sa.Column(u'ip_ext_vdom', mysql.VARCHAR(length=32), nullable=True),
+    sa.Column(u'vlink_ip_subnet', mysql.VARCHAR(length=32), server_default=sa.text(u"''"), nullable=False),
+    sa.Column(u'vdom_name', mysql.VARCHAR(length=11), nullable=True),
     sa.Column(u'vlan_id', mysql.INTEGER(display_width=11), autoincrement=False, nullable=True),
     sa.Column(u'allocated', mysql.TINYINT(display_width=1), autoincrement=False, nullable=True),
-    sa.PrimaryKeyConstraint(u'id'),
+    sa.PrimaryKeyConstraint(u'vlink_ip_subnet'),
     mysql_default_charset=u'utf8',
     mysql_engine=u'InnoDB'
     )
